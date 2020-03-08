@@ -1,0 +1,215 @@
+FILENAME REFFILE '/home/u38414700/factor momentum/data/ret/TRD_Dalyr.txt';
+
+PROC IMPORT DATAFILE=REFFILE
+	DBMS=tab
+	OUT=WORK.ret0
+	REPLACE;
+	GETNAMES=YES;
+	GUESSINGROWS=2000;
+RUN;
+
+FILENAME REFFILE '/home/u38414700/factor momentum/data/ret/TRD_Dalyr1.txt';
+
+PROC IMPORT DATAFILE=REFFILE
+	DBMS=tab
+	OUT=WORK.ret1
+	REPLACE;
+	GETNAMES=YES;
+	GUESSINGROWS=2000;
+RUN;
+
+FILENAME REFFILE '/home/u38414700/factor momentum/data/ret/TRD_Dalyr2.txt';
+
+PROC IMPORT DATAFILE=REFFILE
+	DBMS=tab
+	OUT=WORK.ret2
+	REPLACE;
+	GETNAMES=YES;
+	GUESSINGROWS=2000;
+RUN;
+
+FILENAME REFFILE '/home/u38414700/factor momentum/data/ret/TRD_Dalyr3.txt';
+
+PROC IMPORT DATAFILE=REFFILE
+	DBMS=tab
+	OUT=WORK.ret3
+	REPLACE;
+	GETNAMES=YES;
+	GUESSINGROWS=2000;
+RUN;
+FILENAME REFFILE '/home/u38414700/factor momentum/data/ret/TRD_Dalyr4.txt';
+
+PROC IMPORT DATAFILE=REFFILE
+	DBMS=tab
+	OUT=WORK.ret4
+	REPLACE;
+	GETNAMES=YES;
+	GUESSINGROWS=2000;
+RUN;
+FILENAME REFFILE '/home/u38414700/factor momentum/data/ret/TRD_Dalyr5.txt';
+
+PROC IMPORT DATAFILE=REFFILE
+	DBMS=tab
+	OUT=WORK.ret5
+	REPLACE;
+	GETNAMES=YES;
+	GUESSINGROWS=2000;
+RUN;
+FILENAME REFFILE '/home/u38414700/factor momentum/data/ret/TRD_Dalyr6.txt';
+
+PROC IMPORT DATAFILE=REFFILE
+	DBMS=tab
+	OUT=WORK.ret6
+	REPLACE;
+	GETNAMES=YES;
+	GUESSINGROWS=2000;
+RUN;
+FILENAME REFFILE '/home/u38414700/factor momentum/data/ret/TRD_Dalyr7.txt';
+
+PROC IMPORT DATAFILE=REFFILE
+	DBMS=tab
+	OUT=WORK.ret7
+	REPLACE;
+	GETNAMES=YES;
+	GUESSINGROWS=2000;
+RUN;
+FILENAME REFFILE '/home/u38414700/factor momentum/data/ret/TRD_Dalyr8.txt';
+
+PROC IMPORT DATAFILE=REFFILE
+	DBMS=tab
+	OUT=WORK.ret8
+	REPLACE;
+	GETNAMES=YES;
+	GUESSINGROWS=2000;
+RUN;
+
+FILENAME REFFILE '/home/u38414700/factor momentum/data/ret/TRD_Dalyr9.txt';
+
+PROC IMPORT DATAFILE=REFFILE
+	DBMS=tab
+	OUT=WORK.ret9
+	REPLACE;
+	GETNAMES=YES;
+	GUESSINGROWS=2000;
+RUN;
+
+FILENAME REFFILE '/home/u38414700/factor momentum/data/ret/TRD_Dalyr10.txt';
+
+PROC IMPORT DATAFILE=REFFILE
+	DBMS=tab
+	OUT=WORK.ret10
+	REPLACE;
+	GETNAMES=YES;
+	GUESSINGROWS=2000;
+RUN;
+
+data ret_raw;set ret0 ret1 ret2 ret3 ret4 ret5 ret6 ret7 ret8 ret9 ret10;
+	year=year(Trddt);
+	month=month(Trddt);
+	week=week(Trddt);
+	num=1;
+run;
+%rename(dsetin=ret_raw, vars= Adjprcwd Clsprc Dnshrtrd Dnvaltrd Dretwd Dsmvosd Dsmvtll, 
+varn=adj_price price trad_share trading_volume adj_ret liq_size size);
+
+/*标记市值排序*/
+data ret_raw_year;set ret_raw;run;
+proc sort data=ret_raw_year;by stkcd year descending trddt;quit;
+proc sort data=ret_raw_year nodupkey;by stkcd year;quit;
+proc sort data=ret_raw_year ;by year;quit;
+proc rank data=ret_raw_year groups=10 out=size_rank;
+	by year ; 
+	var size;
+	ranks size_rank;
+run;
+data size_rank;set size_rank;
+	keep stkcd year size_rank;
+	year=year+1;
+	if year<2020;
+	proc sort;by stkcd year;
+run;
+
+/*标记上市不到一年的股票*/
+FILENAME REFFILE '/home/u38414700/factor momentum/data/IPO_Ipoday.txt';
+
+PROC IMPORT DATAFILE=REFFILE
+	DBMS=tab
+	OUT=WORK.list
+	REPLACE;
+	GETNAMES=YES;
+	GUESSINGROWS=2000;
+RUN;
+
+proc sort data=ret_raw; by stkcd;quit;
+data ld;
+	merge list ret_raw(in=a);
+	by stkcd;
+	if a;
+	ld=trddt-listdt;
+	if ld<180;
+	keep stkcd trddt ld;
+run;
+
+/*统计上一年/上一月交易日*/
+data date;set ret_raw;
+	keep trddt;
+run;
+proc sort data=date nodupkey;by trddt;quit;
+data code;set ret_raw;
+	keep stkcd;
+run;
+proc sort data=code nodupkey;by stkcd;quit;
+proc sql;
+ create table dc as
+ select *
+ from code,date;
+quit; 
+proc sort data= ret_raw;by stkcd trddt;quit;
+proc sort data= dc;by stkcd trddt;quit;
+data trade_data;
+	merge ret_raw dc(in=a);
+	by stkcd trddt;
+	if a;
+run;
+
+proc expand data=trade_data out=count method=none;
+	convert  num= p_y / transform=(lag 1 movsum 250);/*交易年*/
+	convert  num= p_m / transform=(lag 1 movsum 20);/*交易月*/ 
+	by stkcd;
+run;
+data count_past;set count;
+	if price ne .;
+	drop TIME num;
+run;
+/*
+data count_past_month;set count_past;
+	by stkcd year month;
+	if last.month;
+run;
+proc export data = count_past_month
+outfile = "/home/u38414700/factor momentum/data/count_past_month.csv"
+dbms = dlm;
+delimiter = '09'x;
+run;
+*/
+/*合并*/
+data ret_1;
+	merge ret_raw(in=a)	 size_rank;
+	by stkcd year;
+	if a;
+run;
+data ret_sort;
+	merge ret_1(in=a) count_past ld;
+	by stkcd trddt;
+	if a;
+run;
+/*删除市值最小30%，其他筛选放在计算月度收益率后进行*/
+data ret;set ret_sort;
+	if (size_rank>2);
+	drop size_rank;
+run;
+
+proc delete data=ret0 ret1 ret2 ret3 ret4 ret5 ret6 ret7 ret8 ret9 ret10
+				  WORK.CODE WORK.COUNT WORK.COUNT_PAST WORK.COUNT_PAST_MONTH
+				  WORK.DATE WORK.DC WORK.LD WORK.LIST WORK.RET_1
+				  WORK.RET_RAW WORK.RET_RAW_YEAR WORK.RET_SORT WORK.SIZE_RANK WORK.TRADE_DATA;quit;
