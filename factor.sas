@@ -43,15 +43,7 @@ data month_ret;set price;
 run;
 	
 
-data size_t;set ret_fin;
-	month_id=month_id+1;
-	keep stkcd month_id size;
-run;
-data size;
-	merge ret_fin(in=a drop=size) size_t;
-	by stkcd month_id;
-	if a;
-run;
+
 
 data asset; set "/home/u38414700/factor momentum/data/characteristic/asset.sas7bdat";
 drop Accper;proc sort;by stkcd year month;run;
