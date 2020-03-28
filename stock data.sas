@@ -106,28 +106,45 @@ RUN;
 data ret_raw;set ret0 ret1 ret2 ret3 ret4 ret5 ret6 ret7 ret8 ret9 ret10;
 	year=year(Trddt);
 	month=month(Trddt);
-	week=week(Trddt);
+	month_id=(year-1999)*12+month;
 	num=1;
 run;
 %rename(dsetin=ret_raw, vars= Adjprcwd Clsprc Dnshrtrd Dnvaltrd Dretwd Dsmvosd Dsmvtll, 
 varn=adj_price price trad_share trading_volume adj_ret liq_size size);
 
-/*标记市值排序*/
-data ret_raw_year;set ret_raw;run;
-proc sort data=ret_raw_year;by stkcd year descending trddt;quit;
-proc sort data=ret_raw_year nodupkey;by stkcd year;quit;
-proc sort data=ret_raw_year ;by year;quit;
-proc rank data=ret_raw_year groups=10 out=size_rank;
-	by year ; 
+/*monthly*/
+proc sort data=ret_raw;by stkcd year month trddt;quit;
+data monthly;set ret_raw;
+	by stkcd year month;
+	if last.month;
+	rename trddt=date;
+run;
+/*month return*/
+data price;set monthly;
+	l_p=lag(adj_price);
+	month_ret=adj_price/l_p-1;
+run;
+data month_ret;set price;
+	by stkcd year month;
+	if first.stkcd then month_ret=.;
+	keep stkcd date year month month_ret;
+run;
+proc delete data=price;quit;
+
+/*根据市值排序*/
+proc sort data=monthly;by year month;quit;
+proc rank data=monthly groups=10 out=size_rank_r;
+	by year month; 
 	var size;
 	ranks size_rank;
 run;
-data size_rank;set size_rank;
-	keep stkcd year size_rank;
-	year=year+1;
-	if year<2020;
-	proc sort;by stkcd year;
+data size_rank;set size_rank_r;
+	month_id=month_id+1;
+	if month_id<247;
+	keep stkcd month_id size_rank;
+	proc sort;by stkcd month_id;
 run;
+proc delete data=size_rank_r;quit;
 
 /*标记上市不到一年的股票*/
 FILENAME REFFILE '/home/u38414700/factor momentum/data/IPO_Ipoday.txt';
@@ -146,8 +163,9 @@ data ld;
 	by stkcd;
 	if a;
 	ld=trddt-listdt;
-	if ld<180;
+	if ld<183;
 	keep stkcd trddt ld;
+	rename trddt=date;
 run;
 
 /*统计上一年/上一月交易日*/
@@ -179,8 +197,10 @@ proc expand data=trade_data out=count method=none;
 run;
 data count_past;set count;
 	if price ne .;
-	drop TIME num;
+	keep  Stkcd Trddt p_m p_y;
+	rename trddt=date;
 run;
+proc delete data=date code dc trade_data count;quit;
 /*
 data count_past_month;set count_past;
 	by stkcd year month;
@@ -192,24 +212,33 @@ dbms = dlm;
 delimiter = '09'x;
 run;
 */
-/*合并*/
-data ret_1;
-	merge ret_raw(in=a)	 size_rank;
-	by stkcd year;
-	if a;
-run;
-data ret_sort;
-	merge ret_1(in=a) count_past ld;
-	by stkcd trddt;
-	if a;
-run;
-/*删除市值最小30%，其他筛选放在计算月度收益率后进行*/
-data ret;set ret_sort;
-	if (size_rank>2);
-	drop size_rank;
+/*可选股票*/
+data size;set monthly;
+	size=size*1000;
+	month_id=month_id+1;
+	keep stkcd size month_id;
 run;
 
+proc sort data=monthly;by stkcd date;quit;
+data oldstock;
+	merge monthly(in=a) ld count_past month_ret(drop=year month);
+	by stkcd date;
+	if a&(ld = .)&(p_y>119)&(p_m>14);
+	drop ld p_y p_m;
+run;
+data selected;
+	merge oldstock(in=a) size_rank;
+	by stkcd month_id;
+	if a&(size_rank>2);
+	drop size_rank adj_price adj_ret 
+	liq_size num price size 
+	trad_share trading_volume;
+run;
+proc delete data=ld count_past size_rank monthly oldstock;quit;
+
+data ret;set ret_raw;run;
+	
+
 proc delete data=ret0 ret1 ret2 ret3 ret4 ret5 ret6 ret7 ret8 ret9 ret10
-				  WORK.CODE WORK.COUNT WORK.COUNT_PAST WORK.COUNT_PAST_MONTH
-				  WORK.DATE WORK.DC WORK.LD WORK.LIST WORK.RET_1
-				  WORK.RET_RAW WORK.RET_RAW_YEAR WORK.RET_SORT WORK.SIZE_RANK WORK.TRADE_DATA;quit;
+				 WORK.LIST WORK.RET_RAW WORK.MONTH_RET WORK.SIZE;quit;
+
